@@ -1,0 +1,17 @@
+[project]
+name = "covas-plugin-host"
+version = "0.1.0"
+description = "Standalone COVAS:NEXT plugin host with OpenAI-compatible audio API"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "python-multipart==0.0.20",
+    "pydantic==2.12.4",
+    "numpy==1.26.4",
+    "soundfile==0.12.1",
+    "SpeechRecognition==3.10.4",
+]
+
+[dependency-groups]
+dev = []
