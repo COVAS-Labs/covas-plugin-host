@@ -7,10 +7,11 @@ import contextlib
 from collections.abc import Iterable, Iterator
 
 import anyio
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .auth import verify_request
 from .audio import decode_upload_to_audio_data
 from .config import load_settings
 from .plugin_loader import PluginHost
@@ -32,6 +33,7 @@ host: PluginHost | None = None
 async def lifespan(app: FastAPI):
     global settings, host
     settings = load_settings()
+    app.state.settings = settings
     host = PluginHost(settings["plugins_dir"], settings).load()
     yield
 
@@ -90,7 +92,7 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/v1/models")
-def list_models() -> dict[str, Any]:
+def list_models(auth: Any = Depends(verify_request)) -> dict[str, Any]:
     return {"object": "list", "data": _host().model_list()}
 
 
@@ -101,6 +103,7 @@ async def create_transcription(
     language: str | None = Form(default=None),
     prompt: str | None = Form(default=None),
     response_format: str | None = Form(default="json"),
+    auth: Any = Depends(verify_request),
 ) -> JSONResponse:
     current = _host()
     if current.stt_model is None:
@@ -121,7 +124,11 @@ async def create_transcription(
 
 
 @app.post("/v1/audio/speech")
-def create_speech(request: Request, speech_request: SpeechRequest) -> StreamingResponse:
+def create_speech(
+    request: Request,
+    speech_request: SpeechRequest,
+    auth: Any = Depends(verify_request),
+) -> StreamingResponse:
     current = _host()
     if current.tts_model is None:
         raise HTTPException(status_code=503, detail="TTS model is not available")

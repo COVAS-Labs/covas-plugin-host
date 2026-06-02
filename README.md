@@ -77,6 +77,42 @@ Environment overrides:
 - `COVAS_TTS_VOICE`, default `nova`
 - `COVAS_TTS_RESPONSE_FORMAT`, default `wav`
 - `COVAS_PLUGIN_SETTINGS_JSON`, JSON object merged into `plugin_settings`
+- `COVAS_JWT_SECRET`, enables Bearer JWT verification when set
+
+## Authentication
+
+Authentication is disabled by default. Set `COVAS_JWT_SECRET` or `auth.jwt_secret` in `settings.json` to require Bearer JWTs for all `/v1/*` endpoints.
+
+Tokens use HS256 by default and must include:
+
+- `sub`: UUID subject for the token/user.
+- `iat`: issued-at Unix timestamp.
+- `rpm`: positive integer request limit per minute for that token.
+
+Example token generation:
+
+```bash
+uv run python - <<'PY'
+import time
+import uuid
+import jwt
+
+secret = "change-me"
+token = jwt.encode(
+    {"sub": str(uuid.uuid4()), "iat": int(time.time()), "rpm": 60},
+    secret,
+    algorithm="HS256",
+)
+print(token)
+PY
+```
+
+Authenticated request:
+
+```bash
+curl http://localhost:8000/v1/models \
+  -H "Authorization: Bearer $TOKEN"
+```
 
 ## API
 
