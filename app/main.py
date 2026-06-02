@@ -3,11 +3,15 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+import contextlib
+from collections.abc import Iterable, Iterator
+
+import anyio
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .audio import decode_upload_to_audio_data, wav_chunks
+from .audio import decode_upload_to_audio_data
 from .config import load_settings
 from .plugin_loader import PluginHost
 
@@ -33,6 +37,37 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="COVAS Plugin Host", version="0.1.0", lifespan=lifespan)
+
+
+def _next_chunk(iterator: Iterator[bytes]) -> tuple[bool, bytes]:
+    try:
+        return True, next(iterator)
+    except StopIteration:
+        return False, b""
+
+
+async def _stream_audio(request: Request, chunks: Iterable[bytes], include_wav_header: bool) -> Any:
+    iterator = iter(chunks)
+    close = getattr(iterator, "close", None)
+    try:
+        if include_wav_header:
+            from .audio import wav_stream_header
+
+            yield wav_stream_header()
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            has_chunk, chunk = await anyio.to_thread.run_sync(_next_chunk, iterator)
+            if not has_chunk:
+                break
+            if chunk:
+                yield chunk
+    finally:
+        if close is not None:
+            with contextlib.suppress(Exception):
+                close()
 
 
 def _host() -> PluginHost:
@@ -86,23 +121,23 @@ async def create_transcription(
 
 
 @app.post("/v1/audio/speech")
-def create_speech(request: SpeechRequest) -> StreamingResponse:
+def create_speech(request: Request, speech_request: SpeechRequest) -> StreamingResponse:
     current = _host()
     if current.tts_model is None:
         raise HTTPException(status_code=503, detail="TTS model is not available")
 
     configured_tts = settings.get("tts", {})
-    requested_model = request.model or configured_tts.get("provider")
+    requested_model = speech_request.model or configured_tts.get("provider")
     if requested_model and requested_model != configured_tts.get("provider"):
         raise HTTPException(status_code=404, detail=f"TTS model not loaded: {requested_model}")
 
-    voice = request.voice or configured_tts.get("voice", "nova")
-    response_format = request.response_format or configured_tts.get("response_format", "wav")
+    voice = speech_request.voice or configured_tts.get("voice", "nova")
+    response_format = speech_request.response_format or configured_tts.get("response_format", "wav")
 
     try:
-        pcm = current.tts_model.synthesize(request.input, voice)
+        pcm = current.tts_model.synthesize(speech_request.input, voice)
         if response_format == "pcm":
-            return StreamingResponse(pcm, media_type="audio/pcm")
-        return StreamingResponse(wav_chunks(pcm), media_type="audio/wav")
+            return StreamingResponse(_stream_audio(request, pcm, include_wav_header=False), media_type="audio/pcm")
+        return StreamingResponse(_stream_audio(request, pcm, include_wav_header=True), media_type="audio/wav")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
