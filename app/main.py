@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import contextlib
+import math
 from collections.abc import Iterable, Iterator
 
 import anyio
@@ -51,6 +52,10 @@ def _next_chunk(iterator: Iterator[bytes]) -> tuple[bool, bytes]:
         return True, next(iterator)
     except StopIteration:
         return False, b""
+
+
+def _finite_embedding(values: list[float]) -> list[float]:
+    return [float(value) if math.isfinite(float(value)) else 0.0 for value in values]
 
 
 async def _stream_audio(request: Request, chunks: Iterable[bytes], include_wav_header: bool) -> Any:
@@ -183,7 +188,7 @@ def create_embeddings(
         data.append(
             {
                 "object": "embedding",
-                "embedding": embedding,
+                "embedding": _finite_embedding(embedding),
                 "index": index,
             }
         )

@@ -14,7 +14,7 @@ class FakeEmbeddingModel(EmbeddingModel):
         super().__init__("fake-embedding")
 
     def create_embedding(self, input_text: str) -> tuple[str, list[float]]:
-        return self.model_name, [float(len(input_text)), 1.0]
+        return self.model_name, [float(len(input_text)), float("nan")]
 
 
 class FakeHost:
@@ -37,8 +37,8 @@ class EmbeddingsEndpointTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["object"], "list")
         self.assertEqual(payload["model"], "fake-embedding")
-        self.assertEqual(payload["data"][0]["embedding"], [3.0, 1.0])
-        self.assertEqual(payload["data"][1]["embedding"], [5.0, 1.0])
+        self.assertEqual(payload["data"][0]["embedding"], [3.0, 0.0])
+        self.assertEqual(payload["data"][1]["embedding"], [5.0, 0.0])
 
 
 if __name__ == "__main__":
