@@ -44,6 +44,16 @@ docker run --rm -p 8000:8000 \
   covas-plugin-host
 ```
 
+With mounted Pocket TTS reference voices:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -v "$PWD/voices:/app/voices:ro" \
+  covas-plugin-host
+```
+
+Then pass a voice file name without extension, for example `"voice":"selfie"` resolves to `/app/voices/selfie.wav`. Absolute paths and names with extensions are also supported by the Pocket TTS plugin.
+
 ## Settings
 
 Defaults:
@@ -72,6 +82,7 @@ Environment overrides:
 
 - `COVAS_SETTINGS_FILE`, default `/app/settings.json`
 - `COVAS_PLUGINS_DIR`, default `/app/plugins`
+- `COVAS_VOICES_DIR`, default `/app/voices`
 - `COVAS_STT_PROVIDER`, default `parakeet-stt`
 - `COVAS_TTS_PROVIDER`, default `pocket-tts`
 - `COVAS_TTS_VOICE`, default `nova`
@@ -141,7 +152,7 @@ Speech synthesis streams WAV audio:
 ```bash
 curl http://localhost:8000/v1/audio/speech \
   -H 'Content-Type: application/json' \
-  -d '{"model":"pocket-tts","voice":"nova","input":"Destination reached.","response_format":"wav"}' \
+  -d '{"model":"pocket-tts","voice":"selfie","input":"Destination reached.","response_format":"wav"}' \
   --output speech.wav
 ```
 

@@ -24,7 +24,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.17 /uv /uvx /bin/
 COPY pyproject.toml uv.lock /app/
 RUN uv sync --frozen --no-dev --no-install-project
 
-RUN mkdir -p /app/plugins /tmp/plugin-downloads
+RUN mkdir -p /app/plugins /app/voices /tmp/plugin-downloads
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -70,5 +70,7 @@ COPY app /app/app
 COPY lib /app/lib
 
 EXPOSE 8000
+
+VOLUME ["/app/voices"]
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
