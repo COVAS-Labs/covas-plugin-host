@@ -18,6 +18,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "voice": "nova",
         "response_format": "wav",
     },
+    "embedding": {
+        "provider": "gemma-embedding",
+    },
     "plugin_settings": {
         "b7ddc677-0cfc-4081-af61-b2ebc2af5fe3": {
             "num_steps": 2,
@@ -74,6 +77,8 @@ def load_settings() -> dict[str, Any]:
         settings.setdefault("tts", {})["voice"] = os.environ["COVAS_TTS_VOICE"]
     if os.getenv("COVAS_TTS_RESPONSE_FORMAT"):
         settings.setdefault("tts", {})["response_format"] = os.environ["COVAS_TTS_RESPONSE_FORMAT"]
+    if os.getenv("COVAS_EMBEDDING_PROVIDER"):
+        settings.setdefault("embedding", {})["provider"] = os.environ["COVAS_EMBEDDING_PROVIDER"]
     if os.getenv("COVAS_JWT_SECRET"):
         settings.setdefault("auth", {})["jwt_secret"] = os.environ["COVAS_JWT_SECRET"]
 

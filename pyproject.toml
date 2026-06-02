@@ -15,4 +15,6 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "httpx==0.28.1",
+]

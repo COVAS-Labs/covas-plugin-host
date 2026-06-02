@@ -2,6 +2,7 @@ FROM python:3.12-slim
 
 ARG PARAKEET_VERSION=""
 ARG POCKET_TTS_VERSION=""
+ARG GEMMA_EMBEDDING_VERSION=""
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -64,6 +65,7 @@ RUN download_plugin() { \
     }; \
     download_plugin "COVAS-Labs/plugin-parakeet-stt" "$PARAKEET_VERSION" "cn-plugin-parakett-stt" "cn-plugin-parakett-stt"; \
     download_plugin "COVAS-Labs/plugin-pocket-tts" "$POCKET_TTS_VERSION" "cn-plugin-pocket-tts" "cn-plugin-pocket-tts"; \
+    download_plugin "COVAS-Labs/plugin-gemma-embedding" "$GEMMA_EMBEDDING_VERSION" "cn-plugin-gemma-embedding" "cn-plugin-gemma-embedding"; \
     rm -rf /tmp/plugin-downloads
 
 COPY app /app/app

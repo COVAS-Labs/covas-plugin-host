@@ -6,6 +6,7 @@ The image bakes in:
 
 - Parakeet STT: `COVAS-Labs/plugin-parakeet-stt`
 - Pocket TTS: `COVAS-Labs/plugin-pocket-tts`
+- Gemma Embedding: `COVAS-Labs/plugin-gemma-embedding`
 
 ## Build
 
@@ -27,6 +28,7 @@ Pin plugin release tags, with empty args falling back to latest:
 docker build \
   --build-arg PARAKEET_VERSION=v0.0.1 \
   --build-arg POCKET_TTS_VERSION=v0.0.11 \
+  --build-arg GEMMA_EMBEDDING_VERSION=v0.0.6 \
   -t covas-plugin-host .
 ```
 
@@ -68,6 +70,9 @@ Defaults:
     "voice": "nova",
     "response_format": "wav"
   },
+  "embedding": {
+    "provider": "gemma-embedding"
+  },
   "plugin_settings": {
     "b7ddc677-0cfc-4081-af61-b2ebc2af5fe3": {
       "num_steps": 2,
@@ -85,6 +90,7 @@ Environment overrides:
 - `COVAS_VOICES_DIR`, default `/app/voices`
 - `COVAS_STT_PROVIDER`, default `parakeet-stt`
 - `COVAS_TTS_PROVIDER`, default `pocket-tts`
+- `COVAS_EMBEDDING_PROVIDER`, default `gemma-embedding`
 - `COVAS_TTS_VOICE`, default `nova`
 - `COVAS_TTS_RESPONSE_FORMAT`, default `wav`
 - `COVAS_PLUGIN_SETTINGS_JSON`, JSON object merged into `plugin_settings`
@@ -154,6 +160,14 @@ curl http://localhost:8000/v1/audio/speech \
   -H 'Content-Type: application/json' \
   -d '{"model":"pocket-tts","voice":"selfie","input":"Destination reached.","response_format":"wav"}' \
   --output speech.wav
+```
+
+Embeddings:
+
+```bash
+curl http://localhost:8000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma-embedding","input":["Elite Dangerous","COVAS plugin host"]}'
 ```
 
 ## Notes

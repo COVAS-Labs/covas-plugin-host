@@ -6,7 +6,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from lib.Models import STTModel, TTSModel
+from lib.Models import EmbeddingModel, STTModel, TTSModel
 from app.plugin_loader import PluginHost
 
 
@@ -31,7 +31,7 @@ class PluginLoaderTests(unittest.TestCase):
                 textwrap.dedent(
                     """
                     from lib.PluginBase import PluginBase
-                    from lib.PluginHelper import STTModel, TTSModel
+                    from lib.PluginHelper import EmbeddingModel, STTModel, TTSModel
 
                     class FakeSTT(STTModel):
                         def __init__(self):
@@ -45,18 +45,27 @@ class PluginLoaderTests(unittest.TestCase):
                         def synthesize(self, text, voice):
                             yield b'audio'
 
+                    class FakeEmbedding(EmbeddingModel):
+                        def __init__(self):
+                            super().__init__('fake-embedding')
+                        def create_embedding(self, input_text):
+                            return ('fake-embedding', [1.0, 2.0, 3.0])
+
                     class FakePlugin(PluginBase):
                         def __init__(self, plugin_manifest):
                             super().__init__(plugin_manifest)
                             self.model_providers = [
                                 {'kind': 'stt', 'id': 'fake-stt', 'label': 'Fake STT', 'settings_config': []},
                                 {'kind': 'tts', 'id': 'fake-tts', 'label': 'Fake TTS', 'settings_config': []},
+                                {'kind': 'embedding', 'id': 'fake-embedding', 'label': 'Fake Embedding', 'settings_config': []},
                             ]
                         def create_model(self, provider_id, settings):
                             if provider_id == 'fake-stt':
                                 return FakeSTT()
                             if provider_id == 'fake-tts':
                                 return FakeTTS()
+                            if provider_id == 'fake-embedding':
+                                return FakeEmbedding()
                             raise ValueError(provider_id)
                     """
                 ),
@@ -68,6 +77,7 @@ class PluginLoaderTests(unittest.TestCase):
                 {
                     "stt": {"provider": "fake-stt"},
                     "tts": {"provider": "fake-tts"},
+                    "embedding": {"provider": "fake-embedding"},
                     "plugin_settings": {},
                 },
             ).load()
@@ -75,7 +85,8 @@ class PluginLoaderTests(unittest.TestCase):
         self.assertEqual(len(host.failed_plugins), 0)
         self.assertIsInstance(host.stt_model, STTModel)
         self.assertIsInstance(host.tts_model, TTSModel)
-        self.assertEqual([model["id"] for model in host.model_list()], ["fake-stt", "fake-tts"])
+        self.assertIsInstance(host.embedding_model, EmbeddingModel)
+        self.assertEqual([model["id"] for model in host.model_list()], ["fake-stt", "fake-tts", "fake-embedding"])
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from lib.Logger import log
-from lib.Models import STTModel, TTSModel
+from lib.Models import EmbeddingModel, STTModel, TTSModel
 from lib.PluginBase import PluginBase, PluginManifest
 from lib.PluginSettingDefinitions import ModelProviderDefinition
 
@@ -38,6 +38,7 @@ class PluginHost:
         self.failed_plugins: list[dict[str, Any]] = []
         self.stt_model: STTModel | None = None
         self.tts_model: TTSModel | None = None
+        self.embedding_model: EmbeddingModel | None = None
 
     def load(self) -> "PluginHost":
         plugins_dir = self.plugins_dir.resolve()
@@ -54,6 +55,10 @@ class PluginHost:
         self._register_providers()
         self.stt_model = self.create_model(str(self.settings.get("stt", {}).get("provider", "")), "stt")
         self.tts_model = self.create_model(str(self.settings.get("tts", {}).get("provider", "")), "tts")
+        self.embedding_model = self.create_model(
+            str(self.settings.get("embedding", {}).get("provider", "")),
+            "embedding",
+        )
         return self
 
     def _load_plugin(self, manifest_path: Path) -> None:
@@ -118,7 +123,7 @@ class PluginHost:
                 )
                 log("info", f"Registered {provider['kind']} provider {provider['id']}")
 
-    def create_model(self, provider_id: str, expected_kind: str) -> STTModel | TTSModel | None:
+    def create_model(self, provider_id: str, expected_kind: str) -> STTModel | TTSModel | EmbeddingModel | None:
         if not provider_id:
             return None
 
@@ -132,7 +137,12 @@ class PluginHost:
 
             settings = self.settings.get("plugin_settings", {}).get(record.plugin_guid, {})
             model = plugin.create_model(provider_id, settings)
-            expected_type = STTModel if expected_kind == "stt" else TTSModel
+            expected_types = {
+                "stt": STTModel,
+                "tts": TTSModel,
+                "embedding": EmbeddingModel,
+            }
+            expected_type = expected_types[expected_kind]
             if not isinstance(model, expected_type):
                 raise TypeError(f"Provider {provider_id} returned {type(model).__name__}, expected {expected_type.__name__}")
             log("info", f"Created {expected_kind} model {provider_id}")
@@ -151,5 +161,5 @@ class PluginHost:
                 "kind": record.provider["kind"],
             }
             for record in self.providers
-            if record.provider["kind"] in {"stt", "tts"}
+            if record.provider["kind"] in {"stt", "tts", "embedding"}
         ]

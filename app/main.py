@@ -25,6 +25,11 @@ class SpeechRequest(BaseModel):
     speed: float | None = None
 
 
+class EmbeddingsRequest(BaseModel):
+    input: str | list[str]
+    model: str | None = None
+
+
 settings: dict[str, Any] = {}
 host: PluginHost | None = None
 
@@ -81,13 +86,19 @@ def _host() -> PluginHost:
 @app.get("/health")
 def health() -> dict[str, Any]:
     current = _host()
+    ready = (
+        current.stt_model is not None
+        and current.tts_model is not None
+        and current.embedding_model is not None
+    )
     return {
-        "status": "ok" if current.stt_model is not None and current.tts_model is not None else "degraded",
+        "status": "ok" if ready else "degraded",
         "plugins": [loaded.manifest.__dict__ for loaded in current.plugins],
         "providers": current.model_list(),
         "failed_plugins": current.failed_plugins,
         "stt_ready": current.stt_model is not None,
         "tts_ready": current.tts_model is not None,
+        "embedding_ready": current.embedding_model is not None,
     }
 
 
@@ -148,3 +159,41 @@ def create_speech(
         return StreamingResponse(_stream_audio(request, pcm, include_wav_header=True), media_type="audio/wav")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/v1/embeddings")
+def create_embeddings(
+    request: EmbeddingsRequest,
+    auth: Any = Depends(verify_request),
+) -> dict[str, Any]:
+    current = _host()
+    if current.embedding_model is None:
+        raise HTTPException(status_code=503, detail="Embedding model is not available")
+
+    configured_embedding = settings.get("embedding", {})
+    requested_model = request.model or configured_embedding.get("provider")
+    if requested_model and requested_model != configured_embedding.get("provider"):
+        raise HTTPException(status_code=404, detail=f"Embedding model not loaded: {requested_model}")
+
+    inputs = request.input if isinstance(request.input, list) else [request.input]
+    data = []
+    model_name = requested_model
+    for index, input_text in enumerate(inputs):
+        model_name, embedding = current.embedding_model.create_embedding(input_text)
+        data.append(
+            {
+                "object": "embedding",
+                "embedding": embedding,
+                "index": index,
+            }
+        )
+
+    return {
+        "object": "list",
+        "data": data,
+        "model": model_name,
+        "usage": {
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+        },
+    }
