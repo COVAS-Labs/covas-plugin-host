@@ -57,6 +57,10 @@ RUN download_plugin() { \
         curl -fL "$asset_url" -o "/tmp/plugin-downloads/${asset_prefix}.zip"; \
         mkdir -p "/app/plugins/${target_dir}"; \
         unzip -q "/tmp/plugin-downloads/${asset_prefix}.zip" -d "/app/plugins/${target_dir}"; \
+        if [[ -f "/app/plugins/${target_dir}/requirements.txt" ]]; then \
+            rm -rf "/app/plugins/${target_dir}/deps"; \
+            uv pip install --python /app/.venv/bin/python --target "/app/plugins/${target_dir}/deps" -r "/app/plugins/${target_dir}/requirements.txt"; \
+        fi; \
     }; \
     download_plugin "COVAS-Labs/plugin-parakeet-stt" "$PARAKEET_VERSION" "cn-plugin-parakett-stt" "cn-plugin-parakett-stt"; \
     download_plugin "COVAS-Labs/plugin-pocket-tts" "$POCKET_TTS_VERSION" "cn-plugin-pocket-tts" "cn-plugin-pocket-tts"; \
