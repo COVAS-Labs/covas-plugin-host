@@ -63,9 +63,20 @@ RUN download_plugin() { \
             uv pip install --python /app/.venv/bin/python --target "/app/plugins/${target_dir}/deps" -r "/app/plugins/${target_dir}/requirements.txt"; \
         fi; \
     }; \
+    patch_gemma_embedding_model() { \
+        local target_dir="/app/plugins/cn-plugin-gemma-embedding/model/onnx"; \
+        local base_url="https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX/resolve/main/onnx"; \
+        if [[ ! -d "$target_dir" ]]; then \
+            echo "Gemma embedding model directory not found: $target_dir" >&2; \
+            exit 1; \
+        fi; \
+        curl -fL "$base_url/model_quantized.onnx?download=true" -o "$target_dir/model_fp16.onnx"; \
+        curl -fL "$base_url/model_quantized.onnx_data?download=true" -o "$target_dir/model_quantized.onnx_data"; \
+    }; \
     download_plugin "COVAS-Labs/plugin-parakeet-stt" "$PARAKEET_VERSION" "cn-plugin-parakett-stt" "cn-plugin-parakett-stt"; \
     download_plugin "COVAS-Labs/plugin-pocket-tts" "$POCKET_TTS_VERSION" "cn-plugin-pocket-tts" "cn-plugin-pocket-tts"; \
     download_plugin "COVAS-Labs/plugin-gemma-embedding" "$GEMMA_EMBEDDING_VERSION" "cn-plugin-gemma-embedding" "cn-plugin-gemma-embedding"; \
+    patch_gemma_embedding_model; \
     rm -rf /tmp/plugin-downloads
 
 COPY app /app/app

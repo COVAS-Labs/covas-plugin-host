@@ -8,6 +8,8 @@ The image bakes in:
 - Pocket TTS: `COVAS-Labs/plugin-pocket-tts`
 - Gemma Embedding: `COVAS-Labs/plugin-gemma-embedding`
 
+The Gemma embedding plugin release currently bundles an FP16 ONNX model that returns `NaN` embeddings on CPU in this container. During the image build, the host replaces that artifact with the upstream quantized ONNX variant from `onnx-community/embeddinggemma-300m-ONNX` so embeddings stay finite on CPU.
+
 ## Build
 
 Install host dependencies locally with uv:
@@ -150,6 +152,8 @@ Transcription:
 ```bash
 curl http://localhost:8000/v1/audio/transcriptions \
   -F model=parakeet-stt \
+  -F language=en \
+  -F response_format=text \
   -F file=@speech.wav
 ```
 
@@ -158,7 +162,7 @@ Speech synthesis streams WAV audio:
 ```bash
 curl http://localhost:8000/v1/audio/speech \
   -H 'Content-Type: application/json' \
-  -d '{"model":"pocket-tts","voice":"selfie","input":"Destination reached.","response_format":"wav"}' \
+  -d '{"model":"pocket-tts","voice":"selfie","input":"Destination reached.","response_format":"wav","speed":1.25}' \
   --output speech.wav
 ```
 
@@ -173,6 +177,8 @@ curl http://localhost:8000/v1/embeddings \
 ## Notes
 
 Pocket TTS produces 24 kHz mono signed 16-bit PCM. The host streams that as WAV by prepending a streaming-friendly WAV header.
+
+Transcription supports `json` and `text` response formats. Language and prompt hints are forwarded when the selected STT plugin supports them; Parakeet v3 currently detects its supported languages automatically and does not accept either hint. Speech speed from `0.25` to `4.0` is applied to the PCM stream by the host.
 
 ## Test
 

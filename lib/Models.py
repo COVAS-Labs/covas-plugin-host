@@ -42,7 +42,13 @@ class STTModel(ABC):
         self.provider_name = provider_name
 
     @abstractmethod
-    def transcribe(self, audio: sr.AudioData) -> str:
+    def transcribe(
+        self,
+        audio: sr.AudioData,
+        *,
+        language: str | None = None,
+        prompt: str | None = None,
+    ) -> str:
         pass
 
 

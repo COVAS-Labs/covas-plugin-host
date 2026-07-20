@@ -4,16 +4,17 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import contextlib
+import inspect
 import math
 from collections.abc import Iterable, Iterator
 
 import anyio
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .auth import verify_request
-from .audio import decode_upload_to_audio_data
+from .audio import adjust_pcm_speed, decode_upload_to_audio_data
 from .config import load_settings
 from .plugin_loader import PluginHost
 
@@ -23,7 +24,7 @@ class SpeechRequest(BaseModel):
     input: str = Field(min_length=1)
     voice: str | None = None
     response_format: Literal["wav", "pcm"] | None = None
-    speed: float | None = None
+    speed: float | None = Field(default=None, ge=0.25, le=4.0)
 
 
 class EmbeddingsRequest(BaseModel):
@@ -56,6 +57,26 @@ def _next_chunk(iterator: Iterator[bytes]) -> tuple[bool, bytes]:
 
 def _finite_embedding(values: list[float]) -> list[float]:
     return [float(value) if math.isfinite(float(value)) else 0.0 for value in values]
+
+
+def _transcribe(audio: Any, language: str | None, prompt: str | None) -> str:
+    model = _host().stt_model
+    if model is None:
+        raise HTTPException(status_code=503, detail="STT model is not available")
+
+    options = {key: value for key, value in {"language": language, "prompt": prompt}.items() if value is not None}
+    if not options:
+        return model.transcribe(audio)
+
+    parameters = inspect.signature(model.transcribe).parameters
+    accepts_extra_keywords = any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+    unsupported = [key for key in options if key not in parameters and not accepts_extra_keywords]
+    if unsupported:
+        raise HTTPException(
+            status_code=422,
+            detail=f"STT model does not support: {', '.join(unsupported)}",
+        )
+    return model.transcribe(audio, **options)
 
 
 async def _stream_audio(request: Request, chunks: Iterable[bytes], include_wav_header: bool) -> Any:
@@ -118,9 +139,9 @@ async def create_transcription(
     model: str | None = Form(default=None),
     language: str | None = Form(default=None),
     prompt: str | None = Form(default=None),
-    response_format: str | None = Form(default="json"),
+    response_format: Literal["json", "text"] = Form(default="json"),
     auth: Any = Depends(verify_request),
-) -> JSONResponse:
+) -> Response:
     current = _host()
     if current.stt_model is None:
         raise HTTPException(status_code=503, detail="STT model is not available")
@@ -132,10 +153,14 @@ async def create_transcription(
     data = await file.read()
     try:
         audio = decode_upload_to_audio_data(data, file.filename)
-        text = current.stt_model.transcribe(audio)
+        text = _transcribe(audio, language, prompt)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    if response_format == "text":
+        return PlainTextResponse(text)
     return JSONResponse({"text": text})
 
 
@@ -158,7 +183,7 @@ def create_speech(
     response_format = speech_request.response_format or configured_tts.get("response_format", "wav")
 
     try:
-        pcm = current.tts_model.synthesize(speech_request.input, voice)
+        pcm = adjust_pcm_speed(current.tts_model.synthesize(speech_request.input, voice), speech_request.speed or 1.0)
         if response_format == "pcm":
             return StreamingResponse(_stream_audio(request, pcm, include_wav_header=False), media_type="audio/pcm")
         return StreamingResponse(_stream_audio(request, pcm, include_wav_header=True), media_type="audio/wav")

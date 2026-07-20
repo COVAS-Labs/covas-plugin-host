@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import audioop
 import struct
 import subprocess
 import tempfile
@@ -75,3 +76,23 @@ def wav_stream_header(
 def wav_chunks(pcm_chunks: Iterable[bytes]) -> Iterable[bytes]:
     yield wav_stream_header()
     yield from pcm_chunks
+
+
+def adjust_pcm_speed(pcm_chunks: Iterable[bytes], speed: float) -> Iterable[bytes]:
+    if speed == 1:
+        yield from pcm_chunks
+        return
+
+    state = None
+    output_rate = round(TTS_SAMPLE_RATE / speed)
+    for chunk in pcm_chunks:
+        adjusted, state = audioop.ratecv(
+            chunk,
+            TTS_SAMPLE_WIDTH,
+            TTS_CHANNELS,
+            TTS_SAMPLE_RATE,
+            output_rate,
+            state,
+        )
+        if adjusted:
+            yield adjusted
