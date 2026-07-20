@@ -1,85 +1,68 @@
 # COVAS Plugin Host
 
-Standalone Docker host for COVAS:NEXT local STT/TTS plugins with an OpenAI-compatible audio API.
-
-The image bakes in:
-
-- Parakeet STT: `COVAS-Labs/plugin-parakeet-stt`
-- Pocket TTS: `COVAS-Labs/plugin-pocket-tts`
-- Gemma Embedding: `COVAS-Labs/plugin-gemma-embedding`
-
-The Gemma embedding plugin release currently bundles an FP16 ONNX model that returns `NaN` embeddings on CPU in this container. During the image build, the host replaces that artifact with the upstream quantized ONNX variant from `onnx-community/embeddinggemma-300m-ONNX` so embeddings stay finite on CPU.
-
-## Build
-
-Install host dependencies locally with uv:
-
-```bash
-uv sync
-```
-
-Use latest plugin releases:
-
-```bash
-docker build -t covas-plugin-host .
-```
-
-Pin plugin release tags, with empty args falling back to latest:
-
-```bash
-docker build \
-  --build-arg PARAKEET_VERSION=v0.0.1 \
-  --build-arg POCKET_TTS_VERSION=v0.0.11 \
-  --build-arg GEMMA_EMBEDDING_VERSION=v0.0.6 \
-  -t covas-plugin-host .
-```
+Standalone Docker host for COVAS:NEXT plugins with an OpenAI-compatible audio API. The image starts only the host service; it does not include, download, install, or configure any plugins.
 
 ## Run
 
+Pull the published image:
+
 ```bash
-docker run --rm -p 8000:8000 covas-plugin-host
+docker pull ghcr.io/covas-labs/covas-plugin-host:latest
 ```
 
-With mounted settings:
+Mount a plugin directory and a settings file that selects its providers:
 
 ```bash
 docker run --rm -p 8000:8000 \
+  -v "$PWD/plugins:/app/plugins:ro" \
   -v "$PWD/settings.json:/app/settings.json:ro" \
-  covas-plugin-host
+  ghcr.io/covas-labs/covas-plugin-host:latest
 ```
 
-With mounted Pocket TTS reference voices:
+The mounted directory must contain one directory per plugin, each with a `manifest.json`, its Python entrypoint, models, and a `deps/` directory containing its Python dependencies. Plugin artifacts must be compatible with the image platform (`linux/amd64` or `linux/arm64`). The host does not run plugin installers.
+
+Example layout:
+
+```text
+plugins/
+  your-stt-plugin/
+    manifest.json
+    plugin.py
+    deps/
+    model/
+  your-tts-plugin/
+    manifest.json
+    plugin.py
+    deps/
+```
+
+An empty or absent plugin directory is valid: the host starts and reports no models. Mount the directory at a different path with `COVAS_PLUGINS_DIR` if required.
+
+## Development
+
+Build the image locally only when developing the host:
 
 ```bash
-docker run --rm -p 8000:8000 \
-  -v "$PWD/voices:/app/voices:ro" \
-  covas-plugin-host
+uv sync
+docker build -t covas-plugin-host .
 ```
-
-Then pass a voice file name without extension, for example `"voice":"selfie"` resolves to `/app/voices/selfie.wav`. Absolute paths and names with extensions are also supported by the Pocket TTS plugin.
 
 ## Settings
 
-Defaults:
+The host selects no providers by default. Configure the plugin provider IDs and any plugin-specific settings in `settings.json`:
 
 ```json
 {
-  "stt": {
-    "provider": "parakeet-stt"
-  },
+  "stt": { "provider": "your-stt-provider" },
   "tts": {
-    "provider": "pocket-tts",
-    "voice": "nova",
+    "provider": "your-tts-provider",
+    "voice": "your-voice",
     "response_format": "wav"
   },
-  "embedding": {
-    "provider": "gemma-embedding"
-  },
+  "embedding": { "provider": "your-embedding-provider" },
   "plugin_settings": {
-    "b7ddc677-0cfc-4081-af61-b2ebc2af5fe3": {
-      "num_steps": 2,
-      "max_tokens": 50,
-      "inter_pass_gap_ms": 150
+    "your-plugin-guid": {
+      "your-plugin-setting": "value"
     }
   }
 }
@@ -89,12 +72,11 @@ Environment overrides:
 
 - `COVAS_SETTINGS_FILE`, default `/app/settings.json`
 - `COVAS_PLUGINS_DIR`, default `/app/plugins`
-- `COVAS_VOICES_DIR`, default `/app/voices`
-- `COVAS_STT_PROVIDER`, default `parakeet-stt`
-- `COVAS_TTS_PROVIDER`, default `pocket-tts`
-- `COVAS_EMBEDDING_PROVIDER`, default `gemma-embedding`
-- `COVAS_TTS_VOICE`, default `nova`
-- `COVAS_TTS_RESPONSE_FORMAT`, default `wav`
+- `COVAS_STT_PROVIDER`, overrides `stt.provider`
+- `COVAS_TTS_PROVIDER`, overrides `tts.provider`
+- `COVAS_EMBEDDING_PROVIDER`, overrides `embedding.provider`
+- `COVAS_TTS_VOICE`, overrides `tts.voice`
+- `COVAS_TTS_RESPONSE_FORMAT`, overrides `tts.response_format`
 - `COVAS_PLUGIN_SETTINGS_JSON`, JSON object merged into `plugin_settings`
 - `COVAS_JWT_SECRET`, enables Bearer JWT verification when set
 
@@ -151,7 +133,7 @@ Transcription:
 
 ```bash
 curl http://localhost:8000/v1/audio/transcriptions \
-  -F model=parakeet-stt \
+  -F model=your-stt-provider \
   -F language=en \
   -F response_format=text \
   -F file=@speech.wav
@@ -162,7 +144,7 @@ Speech synthesis streams WAV audio:
 ```bash
 curl http://localhost:8000/v1/audio/speech \
   -H 'Content-Type: application/json' \
-  -d '{"model":"pocket-tts","voice":"selfie","input":"Destination reached.","response_format":"wav","speed":1.25}' \
+  -d '{"model":"your-tts-provider","voice":"your-voice","input":"Destination reached.","response_format":"wav","speed":1.25}' \
   --output speech.wav
 ```
 
@@ -171,12 +153,12 @@ Embeddings:
 ```bash
 curl http://localhost:8000/v1/embeddings \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gemma-embedding","input":["Elite Dangerous","COVAS plugin host"]}'
+  -d '{"model":"your-embedding-provider","input":["Elite Dangerous","COVAS plugin host"]}'
 ```
 
 ## Notes
 
-Pocket TTS produces 24 kHz mono signed 16-bit PCM. The host streams that as WAV by prepending a streaming-friendly WAV header.
+The host treats TTS output as 24 kHz mono signed 16-bit PCM and prepends a streaming-friendly WAV header for WAV responses.
 
 Transcription supports `json` and `text` response formats. Language and prompt hints are forwarded when the selected STT plugin supports them; Parakeet v3 currently detects its supported languages automatically and does not accept either hint. Speech speed from `0.25` to `4.0` is applied to the PCM stream by the host.
 

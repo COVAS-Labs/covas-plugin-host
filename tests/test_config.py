@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.config import POCKET_TTS_PLUGIN_GUID, load_settings
+from app.config import load_settings
 
 
 class ConfigTests(unittest.TestCase):
@@ -36,53 +36,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings["plugin_settings"]["plugin-guid"]["value"], 1)
         self.assertEqual(settings["plugin_settings"]["plugin-guid"]["other"], 2)
 
-    def test_existing_voices_dir_sets_pocket_reference_path(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            voices_dir = Path(tmp) / "voices"
-            voices_dir.mkdir()
+    def test_defaults_do_not_select_or_configure_plugins(self) -> None:
+        with patch.dict(os.environ, {"COVAS_SETTINGS_FILE": "/missing/settings.json"}, clear=True):
+            settings = load_settings()
 
-            env = {
-                "COVAS_SETTINGS_FILE": str(Path(tmp) / "missing.json"),
-                "COVAS_VOICES_DIR": str(voices_dir),
-            }
-            with patch.dict(os.environ, env, clear=False):
-                settings = load_settings()
-
-        self.assertEqual(
-            settings["plugin_settings"][POCKET_TTS_PLUGIN_GUID]["reference_audio_path"],
-            str(voices_dir),
-        )
-
-    def test_explicit_reference_path_wins_over_voices_dir(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            voices_dir = Path(tmp) / "voices"
-            voices_dir.mkdir()
-            configured_reference = str(Path(tmp) / "configured.wav")
-            settings_file = Path(tmp) / "settings.json"
-            settings_file.write_text(
-                json.dumps(
-                    {
-                        "plugin_settings": {
-                            POCKET_TTS_PLUGIN_GUID: {
-                                "reference_audio_path": configured_reference,
-                            }
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            env = {
-                "COVAS_SETTINGS_FILE": str(settings_file),
-                "COVAS_VOICES_DIR": str(voices_dir),
-            }
-            with patch.dict(os.environ, env, clear=False):
-                settings = load_settings()
-
-        self.assertEqual(
-            settings["plugin_settings"][POCKET_TTS_PLUGIN_GUID]["reference_audio_path"],
-            configured_reference,
-        )
+        self.assertEqual(settings["plugins_dir"], "/app/plugins")
+        self.assertEqual(settings["stt"], {})
+        self.assertEqual(settings["tts"], {})
+        self.assertEqual(settings["embedding"], {})
+        self.assertEqual(settings["plugin_settings"], {})
 
 
 if __name__ == "__main__":

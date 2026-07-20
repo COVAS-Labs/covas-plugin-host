@@ -89,7 +89,7 @@ class AudioEndpointTests(unittest.TestCase):
             client = TestClient(app)
             response = client.post(
                 "/v1/audio/speech",
-                json={"model": "fake-tts", "input": "Test", "response_format": "pcm", "speed": 2},
+                json={"model": "fake-tts", "voice": "test", "input": "Test", "response_format": "pcm", "speed": 2},
             )
 
         self.assertEqual(response.status_code, 200)

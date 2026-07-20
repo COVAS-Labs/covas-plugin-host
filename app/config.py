@@ -9,33 +9,15 @@ from typing import Any
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "plugins_dir": "/app/plugins",
-    "voices_dir": "/app/voices",
-    "stt": {
-        "provider": "parakeet-stt",
-    },
-    "tts": {
-        "provider": "pocket-tts",
-        "voice": "nova",
-        "response_format": "wav",
-    },
-    "embedding": {
-        "provider": "gemma-embedding",
-    },
-    "plugin_settings": {
-        "b7ddc677-0cfc-4081-af61-b2ebc2af5fe3": {
-            "num_steps": 2,
-            "max_tokens": 50,
-            "inter_pass_gap_ms": 150,
-        }
-    },
+    "stt": {},
+    "tts": {},
+    "embedding": {},
+    "plugin_settings": {},
     "auth": {
         "jwt_secret": "",
         "jwt_algorithms": ["HS256"],
     },
 }
-
-
-POCKET_TTS_PLUGIN_GUID = "b7ddc677-0cfc-4081-af61-b2ebc2af5fe3"
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -67,8 +49,6 @@ def load_settings() -> dict[str, Any]:
 
     if os.getenv("COVAS_PLUGINS_DIR"):
         settings["plugins_dir"] = os.environ["COVAS_PLUGINS_DIR"]
-    if os.getenv("COVAS_VOICES_DIR"):
-        settings["voices_dir"] = os.environ["COVAS_VOICES_DIR"]
     if os.getenv("COVAS_STT_PROVIDER"):
         settings.setdefault("stt", {})["provider"] = os.environ["COVAS_STT_PROVIDER"]
     if os.getenv("COVAS_TTS_PROVIDER"):
@@ -88,10 +68,5 @@ def load_settings() -> dict[str, Any]:
         if not isinstance(parsed, dict):
             raise ValueError("COVAS_PLUGIN_SETTINGS_JSON must be a JSON object")
         settings["plugin_settings"] = _deep_merge(settings.get("plugin_settings", {}), parsed)
-
-    voices_dir = Path(str(settings.get("voices_dir", "")))
-    pocket_settings = settings.setdefault("plugin_settings", {}).setdefault(POCKET_TTS_PLUGIN_GUID, {})
-    if voices_dir.is_dir() and "reference_audio_path" not in pocket_settings:
-        pocket_settings["reference_audio_path"] = str(voices_dir)
 
     return settings

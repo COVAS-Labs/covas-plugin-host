@@ -112,10 +112,15 @@ def _host() -> PluginHost:
 @app.get("/health")
 def health() -> dict[str, Any]:
     current = _host()
-    ready = (
-        current.stt_model is not None
-        and current.tts_model is not None
-        and current.embedding_model is not None
+    configured_models = {
+        "stt": settings.get("stt", {}).get("provider"),
+        "tts": settings.get("tts", {}).get("provider"),
+        "embedding": settings.get("embedding", {}).get("provider"),
+    }
+    ready = all(
+        getattr(current, f"{kind}_model") is not None
+        for kind, provider in configured_models.items()
+        if provider
     )
     return {
         "status": "ok" if ready else "degraded",
@@ -179,7 +184,9 @@ def create_speech(
     if requested_model and requested_model != configured_tts.get("provider"):
         raise HTTPException(status_code=404, detail=f"TTS model not loaded: {requested_model}")
 
-    voice = speech_request.voice or configured_tts.get("voice", "nova")
+    voice = speech_request.voice or configured_tts.get("voice")
+    if not voice:
+        raise HTTPException(status_code=422, detail="TTS voice must be specified in the request or settings")
     response_format = speech_request.response_format or configured_tts.get("response_format", "wav")
 
     try:
