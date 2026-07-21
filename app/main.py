@@ -14,6 +14,7 @@ import anyio
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.datastructures import MutableHeaders
 
 from .auth import verify_request
 from .audio import adjust_pcm_speed, decode_upload_to_audio_data
@@ -48,97 +49,109 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="COVAS Plugin Host", version="0.1.0", lifespan=lifespan)
-
-
 def _elapsed_ms(started_at: float) -> float:
     return (time.perf_counter() - started_at) * 1000
 
 
-@app.middleware("http")
-async def instrument_request(request: Request, call_next: Any) -> Response:
-    request_id = uuid4().hex
-    started_at = time.perf_counter()
-    try:
-        response = await call_next(request)
-    except Exception as exc:
-        log(
-            "error",
-            "event=request_failed",
-            f"request_id={request_id}",
-            f"method={request.method}",
-            f"path={request.url.path}",
-            f"error={type(exc).__name__}",
-            f"duration_ms={_elapsed_ms(started_at):.1f}",
-        )
-        raise
+class RequestInstrumentationMiddleware:
+    def __init__(self, app: Any):
+        self.app = app
 
-    response.headers["X-Request-ID"] = request_id
-    original_body_iterator = getattr(response, "body_iterator", None)
-    if original_body_iterator is None:
-        log(
-            "info",
-            "event=request_completed",
-            f"request_id={request_id}",
-            f"method={request.method}",
-            f"path={request.url.path}",
-            f"status={response.status_code}",
-            f"duration_ms={_elapsed_ms(started_at):.1f}",
-        )
-        return response
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-    async def instrumented_body() -> Any:
+        request_id = uuid4().hex
+        started_at = time.perf_counter()
+        method = scope["method"]
+        path = scope["path"]
+        status: int | None = None
         bytes_sent = 0
         first_byte_ms: float | None = None
-        completed = False
-        try:
-            async for chunk in original_body_iterator:
-                if chunk:
-                    bytes_sent += len(chunk)
+        response_started = False
+        request_completed = False
+
+        async def send_instrumented(message: dict[str, Any]) -> None:
+            nonlocal status, bytes_sent, first_byte_ms, response_started, request_completed
+            if message["type"] == "http.response.start":
+                status = message["status"]
+                MutableHeaders(scope=message).append("X-Request-ID", request_id)
+                response_started = True
+                log(
+                    "info",
+                    "event=response_started",
+                    f"request_id={request_id}",
+                    f"method={method}",
+                    f"path={path}",
+                    f"status={status}",
+                    f"duration_ms={_elapsed_ms(started_at):.1f}",
+                )
+            elif message["type"] == "http.response.body":
+                body = message.get("body", b"")
+                if body:
+                    bytes_sent += len(body)
                     if first_byte_ms is None:
                         first_byte_ms = _elapsed_ms(started_at)
                         log(
                             "info",
                             "event=response_first_byte",
                             f"request_id={request_id}",
-                            f"method={request.method}",
-                            f"path={request.url.path}",
-                            f"status={response.status_code}",
+                            f"method={method}",
+                            f"path={path}",
+                            f"status={status}",
                             f"ttfb_ms={first_byte_ms:.1f}",
                         )
-                yield chunk
-            completed = True
-        finally:
-            try:
-                close = getattr(original_body_iterator, "aclose", None)
-                if close is not None:
-                    await close()
-            finally:
+
+            await send(message)
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                request_completed = True
                 ttfb = f"{first_byte_ms:.1f}" if first_byte_ms is not None else "none"
                 log(
                     "info",
                     "event=request_completed",
                     f"request_id={request_id}",
-                    f"method={request.method}",
-                    f"path={request.url.path}",
-                    f"status={response.status_code}",
+                    f"method={method}",
+                    f"path={path}",
+                    f"status={status}",
                     f"duration_ms={_elapsed_ms(started_at):.1f}",
                     f"ttfb_ms={ttfb}",
                     f"bytes_sent={bytes_sent}",
-                    f"outcome={'completed' if completed else 'interrupted'}",
+                    "outcome=completed",
                 )
 
-    response.body_iterator = instrumented_body()
-    log(
-        "info",
-        "event=response_started",
-        f"request_id={request_id}",
-        f"method={request.method}",
-        f"path={request.url.path}",
-        f"status={response.status_code}",
-        f"duration_ms={_elapsed_ms(started_at):.1f}",
-    )
-    return response
+        try:
+            await self.app(scope, receive, send_instrumented)
+        except Exception as exc:
+            log(
+                "error",
+                "event=request_failed",
+                f"request_id={request_id}",
+                f"method={method}",
+                f"path={path}",
+                f"error={type(exc).__name__}",
+                f"duration_ms={_elapsed_ms(started_at):.1f}",
+            )
+            raise
+        finally:
+            if response_started and not request_completed:
+                ttfb = f"{first_byte_ms:.1f}" if first_byte_ms is not None else "none"
+                log(
+                    "info",
+                    "event=request_completed",
+                    f"request_id={request_id}",
+                    f"method={method}",
+                    f"path={path}",
+                    f"status={status}",
+                    f"duration_ms={_elapsed_ms(started_at):.1f}",
+                    f"ttfb_ms={ttfb}",
+                    f"bytes_sent={bytes_sent}",
+                    "outcome=interrupted",
+                )
+
+
+app = FastAPI(title="COVAS Plugin Host", version="0.1.0", lifespan=lifespan)
+app.add_middleware(RequestInstrumentationMiddleware)
 
 
 def _next_chunk(iterator: Iterator[bytes]) -> tuple[bool, bytes]:
