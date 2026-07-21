@@ -109,19 +109,24 @@ async def instrument_request(request: Request, call_next: Any) -> Response:
                 yield chunk
             completed = True
         finally:
-            ttfb = f"{first_byte_ms:.1f}" if first_byte_ms is not None else "none"
-            log(
-                "info",
-                "event=request_completed",
-                f"request_id={request_id}",
-                f"method={request.method}",
-                f"path={request.url.path}",
-                f"status={response.status_code}",
-                f"duration_ms={_elapsed_ms(started_at):.1f}",
-                f"ttfb_ms={ttfb}",
-                f"bytes_sent={bytes_sent}",
-                f"outcome={'completed' if completed else 'interrupted'}",
-            )
+            try:
+                close = getattr(original_body_iterator, "aclose", None)
+                if close is not None:
+                    await close()
+            finally:
+                ttfb = f"{first_byte_ms:.1f}" if first_byte_ms is not None else "none"
+                log(
+                    "info",
+                    "event=request_completed",
+                    f"request_id={request_id}",
+                    f"method={request.method}",
+                    f"path={request.url.path}",
+                    f"status={response.status_code}",
+                    f"duration_ms={_elapsed_ms(started_at):.1f}",
+                    f"ttfb_ms={ttfb}",
+                    f"bytes_sent={bytes_sent}",
+                    f"outcome={'completed' if completed else 'interrupted'}",
+                )
 
     response.body_iterator = instrumented_body()
     log(
