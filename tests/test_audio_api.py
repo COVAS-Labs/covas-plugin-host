@@ -32,7 +32,7 @@ class FakeTTSModel(TTSModel):
         super().__init__("fake-tts")
 
     def synthesize(self, text, voice):
-        yield b"\x00\x00\x01\x00\x02\x00\x03\x00\x04\x00\x05\x00\x06\x00\x07\x00"
+        yield b"\x00\x00" * 4800
 
 
 class FakeHost:
@@ -112,7 +112,8 @@ class AudioEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "audio/pcm")
-        self.assertLess(len(response.content), 16)
+        self.assertGreater(len(response.content), 0)
+        self.assertLess(len(response.content), 9600)
 
 
 if __name__ == "__main__":

@@ -160,7 +160,7 @@ curl http://localhost:8000/v1/embeddings \
 
 The host treats TTS output as 24 kHz mono signed 16-bit PCM and prepends a streaming-friendly WAV header for WAV responses.
 
-Transcription supports `json` and `text` response formats. Language and prompt hints are forwarded when the selected STT plugin supports them; Parakeet v3 currently detects its supported languages automatically and does not accept either hint. Speech speed from `0.25` to `4.0` is applied by FFmpeg with pitch preservation while PCM continues to stream.
+Transcription supports `json` and `text` response formats. Language and prompt hints are forwarded when the selected STT plugin supports them; Parakeet v3 currently detects its supported languages automatically and does not accept either hint. Speech speed from `0.25` to `4.0` uses in-process WSOLA pitch-preserving time-scale modification while PCM continues to stream.
 
 ## Observability
 

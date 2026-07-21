@@ -10,6 +10,9 @@ dependencies = [
     "pydantic==2.12.4",
     "SpeechRecognition==3.10.4",
     "pyjwt==2.10.1",
+    "audiotsm==0.1.2",
+    "miniaudio==1.71",
+    "numpy==2.5.1",
 ]
 
 [dependency-groups]

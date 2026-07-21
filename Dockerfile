@@ -1,3 +1,16 @@
+FROM python:3.12-slim AS dependencies
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.17 /uv /uvx /bin/
+COPY pyproject.toml uv.lock /app/
+RUN uv sync --frozen --no-dev --no-install-project
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -7,15 +20,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=ghcr.io/astral-sh/uv:0.11.17 /uv /uvx /bin/
-COPY pyproject.toml uv.lock /app/
-RUN uv sync --frozen --no-dev --no-install-project
+COPY --from=dependencies /app/.venv /app/.venv
 
 RUN mkdir -p /app/plugins
 
