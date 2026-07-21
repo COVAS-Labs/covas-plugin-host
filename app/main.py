@@ -75,6 +75,9 @@ def _transcribe(audio: Any, language: str | None, prompt: str | None) -> str:
     parameters = inspect.signature(model.transcribe).parameters
     accepts_extra_keywords = any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
     unsupported = [key for key in options if key not in parameters and not accepts_extra_keywords]
+    if "prompt" in unsupported:
+        options.pop("prompt")
+        unsupported.remove("prompt")
     if unsupported:
         raise HTTPException(
             status_code=422,
