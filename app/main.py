@@ -64,7 +64,11 @@ def _transcribe(audio: Any, language: str | None, prompt: str | None) -> str:
     if model is None:
         raise HTTPException(status_code=503, detail="STT model is not available")
 
-    options = {key: value for key, value in {"language": language, "prompt": prompt}.items() if value is not None}
+    options = {
+        key: value
+        for key, value in {"language": language, "prompt": prompt}.items()
+        if value and value.strip()
+    }
     if not options:
         return model.transcribe(audio)
 

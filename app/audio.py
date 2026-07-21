@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import audioop
+import os
 import struct
 import subprocess
 import tempfile
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Thread
 from typing import Iterable
 
 import speech_recognition as sr
@@ -83,16 +85,95 @@ def adjust_pcm_speed(pcm_chunks: Iterable[bytes], speed: float) -> Iterable[byte
         yield from pcm_chunks
         return
 
-    state = None
-    output_rate = round(TTS_SAMPLE_RATE / speed)
-    for chunk in pcm_chunks:
-        adjusted, state = audioop.ratecv(
-            chunk,
-            TTS_SAMPLE_WIDTH,
-            TTS_CHANNELS,
-            TTS_SAMPLE_RATE,
-            output_rate,
-            state,
-        )
-        if adjusted:
+    remaining_speed = speed
+    filters = []
+    while remaining_speed > 2:
+        filters.append("atempo=2")
+        remaining_speed /= 2
+    while remaining_speed < 0.5:
+        filters.append("atempo=0.5")
+        remaining_speed /= 0.5
+    if remaining_speed != 1:
+        filters.append(f"atempo={remaining_speed:g}")
+
+    process = subprocess.Popen(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "s16le",
+            "-ar",
+            str(TTS_SAMPLE_RATE),
+            "-ac",
+            str(TTS_CHANNELS),
+            "-i",
+            "pipe:0",
+            "-af",
+            ",".join(filters),
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "pipe:1",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    output: Queue[bytes | None] = Queue()
+    stderr: list[bytes] = []
+
+    def read_stdout() -> None:
+        try:
+            while chunk := os.read(process.stdout.fileno(), 8192):
+                output.put(chunk)
+        finally:
+            output.put(None)
+
+    def read_stderr() -> None:
+        stderr.append(process.stderr.read())
+
+    stdout_thread = Thread(target=read_stdout, daemon=True)
+    stderr_thread = Thread(target=read_stderr, daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+
+    try:
+        for chunk in pcm_chunks:
+            process.stdin.write(chunk)
+            process.stdin.flush()
+            while True:
+                try:
+                    adjusted = output.get_nowait()
+                except Empty:
+                    break
+                if adjusted is not None:
+                    yield adjusted
+
+        process.stdin.close()
+        while adjusted := output.get():
             yield adjusted
+
+        returncode = process.wait()
+        stderr_thread.join()
+        if returncode != 0:
+            error = b"".join(stderr).decode("utf-8", errors="replace").strip()
+            raise ValueError(f"Failed to adjust speech speed with ffmpeg: {error}")
+    finally:
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+        if process.poll() is None:
+            process.terminate()
+            process.wait()
+        stdout_thread.join()
+        stderr_thread.join()
+        process.stdout.close()
+        process.stderr.close()

@@ -82,6 +82,24 @@ class AudioEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"], "STT model does not support: language")
 
+    def test_transcription_ignores_blank_hints_for_plugins_without_hint_support(self) -> None:
+        host = FakeHost(BasicSTTModel(), FakeTTSModel())
+        with (
+            patch("app.main.host", host),
+            patch("app.main.settings", {"stt": {"provider": "basic-stt"}}),
+            patch("app.main.decode_upload_to_audio_data", return_value=object()),
+        ):
+            app.state.settings = {}
+            client = TestClient(app)
+            response = client.post(
+                "/v1/audio/transcriptions",
+                data={"model": "basic-stt", "language": "", "prompt": ""},
+                files={"file": ("speech.wav", b"audio", "audio/wav")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"text": "transcribed text"})
+
     def test_speech_applies_requested_speed(self) -> None:
         host = FakeHost(FakeSTTModel(), FakeTTSModel())
         with patch("app.main.host", host), patch("app.main.settings", {"tts": {"provider": "fake-tts"}}):
