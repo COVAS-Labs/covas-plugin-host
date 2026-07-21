@@ -162,6 +162,15 @@ The host treats TTS output as 24 kHz mono signed 16-bit PCM and prepends a strea
 
 Transcription supports `json` and `text` response formats. Language and prompt hints are forwarded when the selected STT plugin supports them; Parakeet v3 currently detects its supported languages automatically and does not accept either hint. Speech speed from `0.25` to `4.0` is applied by FFmpeg with pitch preservation while PCM continues to stream.
 
+## Observability
+
+Every response includes an `X-Request-ID` header. The host logs structured timing events to stdout without request bodies, query strings, or authorization data:
+
+- `response_started`: request arrival to handler-ready time.
+- `response_first_byte`: server-side time to the first response-body byte.
+- `request_completed`: total duration, first-byte time, bytes sent, and whether the stream completed or was interrupted.
+- `request_failed`: unhandled endpoint failures with elapsed time.
+
 ## Test
 
 ```bash
