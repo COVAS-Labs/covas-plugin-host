@@ -95,6 +95,18 @@ class PluginHost:
 
             plugin = plugin_class(manifest)
             plugin.settings = self.settings.get("plugin_settings", {}).get(manifest.guid, {})
+            previous_settings = dict(plugin.settings)
+            try:
+                settings_version = max(0, int(plugin.settings.get("settings_version", 0)))
+            except (TypeError, ValueError):
+                settings_version = 0
+            target_version = max(0, int(plugin.settings_schema_version))
+            while settings_version < target_version:
+                plugin.migrate_settings(plugin.settings, settings_version)
+                settings_version += 1
+                plugin.settings["settings_version"] = settings_version
+            if plugin.settings != previous_settings:
+                self.settings.setdefault("plugin_settings", {})[manifest.guid] = plugin.settings
             self.plugins.append(LoadedPlugin(folder=plugin_dir, manifest=manifest, plugin=plugin))
             log("info", f"Loaded plugin {manifest.name} ({manifest.guid})")
         except Exception as exc:

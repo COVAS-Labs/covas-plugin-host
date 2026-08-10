@@ -150,7 +150,7 @@ class RequestInstrumentationMiddleware:
                 )
 
 
-app = FastAPI(title="COVAS Plugin Host", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="COVAS Plugin Host", version="0.1.1", lifespan=lifespan)
 app.add_middleware(RequestInstrumentationMiddleware)
 
 

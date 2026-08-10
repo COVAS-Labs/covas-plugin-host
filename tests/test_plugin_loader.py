@@ -88,6 +88,57 @@ class PluginLoaderTests(unittest.TestCase):
         self.assertIsInstance(host.embedding_model, EmbeddingModel)
         self.assertEqual([model["id"] for model in host.model_list()], ["fake-stt", "fake-tts", "fake-embedding"])
 
+    def test_migrates_plugin_settings_to_declared_schema_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_dir = Path(tmp) / "migrating_plugin"
+            plugin_dir.mkdir()
+            (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
+            (plugin_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "guid": "migrating-guid",
+                        "name": "Migrating Plugin",
+                        "version": "1.0.0",
+                        "entrypoint": "migrating_plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_dir / "migrating_plugin.py").write_text(
+                textwrap.dedent(
+                    """
+                    from lib.PluginBase import PluginBase
+
+                    class MigratingPlugin(PluginBase):
+                        settings_schema_version = 2
+
+                        def __init__(self, plugin_manifest):
+                            super().__init__(plugin_manifest)
+
+                        def migrate_settings(self, settings, from_version):
+                            if from_version == 0:
+                                settings['threads'] = min(4, settings.get('threads', 4))
+                            elif from_version == 1:
+                                settings['second_step_applied'] = True
+                    """
+                ),
+                encoding="utf-8",
+            )
+            settings = {
+                "stt": {"provider": ""},
+                "tts": {"provider": ""},
+                "embedding": {"provider": ""},
+                "plugin_settings": {"migrating-guid": {"threads": 8}},
+            }
+
+            host = PluginHost(tmp, settings).load()
+
+        self.assertEqual(len(host.failed_plugins), 0)
+        self.assertEqual(
+            settings["plugin_settings"]["migrating-guid"],
+            {"threads": 4, "second_step_applied": True, "settings_version": 2},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

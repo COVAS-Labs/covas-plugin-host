@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from .PluginSettingDefinitions import ModelProviderDefinition, PluginSettings
 
@@ -23,6 +23,7 @@ class PluginManifest:
 
 class PluginBase(ABC):
     plugin_manifest: PluginManifest
+    settings_schema_version: ClassVar[int] = 0
     settings_config: PluginSettings | None = None
     settings: dict[str, Any] = {}
     model_providers: list[ModelProviderDefinition] | None = None
@@ -35,6 +36,10 @@ class PluginBase(ABC):
         pass
 
     def on_chat_stop(self, helper: Any):
+        pass
+
+    def migrate_settings(self, settings: dict[str, Any], from_version: int) -> None:
+        """Migrate settings from one schema version to the next."""
         pass
 
     def create_model(self, provider_id: str, settings: dict[str, Any]):
