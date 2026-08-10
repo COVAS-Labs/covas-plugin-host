@@ -10,16 +10,51 @@ Pull the published image:
 docker pull ghcr.io/covas-labs/covas-plugin-host:latest
 ```
 
-Mount a plugin directory and a settings file that selects its providers:
+Create the mount sources before starting Docker. If `settings.json` does not
+exist, Docker creates a directory at that path and the host cannot start.
 
 ```bash
-docker run --rm -p 8000:8000 \
+mkdir -p plugins
+printf '{}\n' > settings.json
+```
+
+Start an empty host:
+
+```bash
+docker run --rm --name covas-plugin-host -p 8000:8000 \
+  --platform linux/amd64 \
   -v "$PWD/plugins:/app/plugins:ro" \
   -v "$PWD/settings.json:/app/settings.json:ro" \
   ghcr.io/covas-labs/covas-plugin-host:latest
 ```
 
-The mounted directory must contain one directory per plugin, each with a `manifest.json`, its Python entrypoint, models, and a `deps/` directory containing its Python dependencies. Plugin artifacts must be compatible with the image platform (`linux/amd64` or `linux/arm64`). The host does not run plugin installers.
+In another terminal, verify that the host is running. An empty host reports no
+providers by design.
+
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8000/v1/models
+```
+
+The mounted directory must contain one directory per plugin. Extract each
+plugin ZIP into its own direct child of `plugins/`; do not place the ZIP itself
+there and do not extract its files directly into the `plugins/` root.
+
+```bash
+mkdir -p plugins/parakeet-stt
+unzip cn-plugin-parakett-stt-*-linux.zip -d plugins/parakeet-stt
+```
+
+Each plugin directory must contain `manifest.json`, its Python entrypoint,
+models, and a `deps/` directory containing its Python dependencies. The host
+does not run plugin installers.
+
+Official `*-linux.zip` plugin release artifacts currently contain Linux x86_64
+native dependencies. Use `--platform linux/amd64` as shown above, including on
+Apple Silicon and other ARM hosts. The native `linux/arm64` host image can only
+load plugins whose dependencies were separately packaged for Linux ARM64.
+Windows plugin archives and plugins packaged locally on macOS are not compatible
+with the Linux container.
 
 Example layout:
 
@@ -80,6 +115,29 @@ Environment overrides:
 - `COVAS_PLUGIN_SETTINGS_JSON`, JSON object merged into `plugin_settings`
 - `COVAS_JWT_SECRET`, enables Bearer JWT verification when set
 
+## Troubleshooting
+
+Check health before making model requests:
+
+```bash
+curl -s http://localhost:8000/health
+docker logs covas-plugin-host
+```
+
+`/health` reports configured model readiness and includes `failed_plugins` with
+the import or initialization error for every plugin that could not load. Common
+causes are:
+
+- `settings.json` was not created before `docker run` and was mounted as a directory.
+- A plugin ZIP was not extracted into its own direct child of `plugins/`.
+- A Windows, macOS, or x86_64 plugin package is being loaded by an incompatible container platform.
+- The configured provider does not match the provider ID contributed by the plugin.
+
+Do not send model requests until the corresponding `stt_ready`, `tts_ready`, or
+`embedding_ready` value is `true`. An unavailable configured model returns HTTP
+503; HTTP 500 indicates an error raised by a model that did load, and its detail
+and the container logs should be included in bug reports.
+
 ## Authentication
 
 Authentication is disabled by default. Set `COVAS_JWT_SECRET` or `auth.jwt_secret` in `settings.json` to require Bearer JWTs for all `/v1/*` endpoints.
@@ -117,6 +175,10 @@ curl http://localhost:8000/v1/models \
 
 ## API
 
+The `your-*` values below are placeholders. Install a compatible plugin, select
+its actual provider ID in `settings.json`, restart the host, and confirm the
+corresponding readiness value in `/health` before using these requests.
+
 Health:
 
 ```bash
@@ -134,7 +196,6 @@ Transcription:
 ```bash
 curl http://localhost:8000/v1/audio/transcriptions \
   -F model=your-stt-provider \
-  -F language=en \
   -F response_format=text \
   -F file=@speech.wav
 ```
