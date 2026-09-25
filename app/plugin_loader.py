@@ -3,11 +3,13 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import queue
 import sys
 import traceback
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from lib.Logger import log
 from lib.Models import EmbeddingModel, STTModel, TTSModel
@@ -29,13 +31,46 @@ class ProviderRecord:
     provider: ModelProviderDefinition
 
 
+class ModelPool:
+    """A fixed set of independently created model instances leased per request."""
+
+    def __init__(self, models: list[STTModel | TTSModel | EmbeddingModel]):
+        if not models:
+            raise ValueError("A model pool must contain at least one model")
+        self.models = models
+        self._available: queue.Queue[STTModel | TTSModel | EmbeddingModel] = queue.Queue(maxsize=len(models))
+        for model in models:
+            self._available.put_nowait(model)
+
+    @property
+    def size(self) -> int:
+        return len(self.models)
+
+    def acquire(self, timeout: float | None = None) -> STTModel | TTSModel | EmbeddingModel:
+        return self._available.get(timeout=timeout)
+
+    def release(self, model: STTModel | TTSModel | EmbeddingModel) -> None:
+        self._available.put(model)
+
+    @contextmanager
+    def lease(self) -> Iterator[STTModel | TTSModel | EmbeddingModel]:
+        model = self.acquire()
+        try:
+            yield model
+        finally:
+            self.release(model)
+
+
 class PluginHost:
+    MAX_MODEL_CONCURRENCY = 64
+
     def __init__(self, plugins_dir: str | Path, settings: dict[str, Any]):
         self.plugins_dir = Path(plugins_dir)
         self.settings = settings
         self.plugins: list[LoadedPlugin] = []
         self.providers: list[ProviderRecord] = []
         self.failed_plugins: list[dict[str, Any]] = []
+        self.model_pools: dict[str, ModelPool | None] = {"stt": None, "tts": None, "embedding": None}
         self.stt_model: STTModel | None = None
         self.tts_model: TTSModel | None = None
         self.embedding_model: EmbeddingModel | None = None
@@ -53,12 +88,13 @@ class PluginHost:
             self._load_plugin(manifest_path)
 
         self._register_providers()
-        self.stt_model = self.create_model(str(self.settings.get("stt", {}).get("provider", "")), "stt")
-        self.tts_model = self.create_model(str(self.settings.get("tts", {}).get("provider", "")), "tts")
-        self.embedding_model = self.create_model(
-            str(self.settings.get("embedding", {}).get("provider", "")),
-            "embedding",
-        )
+        for kind in ("stt", "tts", "embedding"):
+            model_pool = self.create_model_pool(
+                str(self.settings.get(kind, {}).get("provider", "")),
+                kind,
+            )
+            self.model_pools[kind] = model_pool
+            setattr(self, f"{kind}_model", model_pool.models[0] if model_pool else None)
         return self
 
     def _load_plugin(self, manifest_path: Path) -> None:
@@ -162,6 +198,27 @@ class PluginHost:
 
         log("warning", f"No {expected_kind} provider found for {provider_id}")
         return None
+
+    def create_model_pool(self, provider_id: str, expected_kind: str) -> ModelPool | None:
+        if not provider_id:
+            return None
+
+        model_settings = self.settings.get(expected_kind, {})
+        concurrency = model_settings.get("concurrency", 1)
+        if (
+            isinstance(concurrency, bool)
+            or not isinstance(concurrency, int)
+            or not 1 <= concurrency <= self.MAX_MODEL_CONCURRENCY
+        ):
+            raise ValueError(
+                f"{expected_kind}.concurrency must be an integer between 1 and "
+                f"{self.MAX_MODEL_CONCURRENCY}"
+            )
+
+        models = [self.create_model(provider_id, expected_kind) for _ in range(concurrency)]
+        if any(model is None for model in models):
+            return None
+        return ModelPool(models)
 
     def model_list(self) -> list[dict[str, Any]]:
         return [

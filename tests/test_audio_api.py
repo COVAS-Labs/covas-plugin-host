@@ -6,6 +6,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.plugin_loader import ModelPool
 from lib.Models import STTModel, TTSModel
 
 
@@ -40,6 +41,11 @@ class FakeHost:
         self.stt_model = stt_model
         self.tts_model = tts_model
         self.embedding_model = None
+        self.model_pools = {
+            "stt": ModelPool([stt_model]),
+            "tts": ModelPool([tts_model]),
+            "embedding": None,
+        }
 
 
 class AudioEndpointTests(unittest.TestCase):
@@ -114,6 +120,9 @@ class AudioEndpointTests(unittest.TestCase):
         self.assertEqual(response.headers["content-type"], "audio/pcm")
         self.assertGreater(len(response.content), 0)
         self.assertLess(len(response.content), 9600)
+        released_model = host.model_pools["tts"].acquire(timeout=0.1)
+        self.assertIs(released_model, host.tts_model)
+        host.model_pools["tts"].release(released_model)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Literal
 
 import contextlib
@@ -165,8 +165,25 @@ def _finite_embedding(values: list[float]) -> list[float]:
     return [float(value) if math.isfinite(float(value)) else 0.0 for value in values]
 
 
-def _transcribe(audio: Any, language: str | None, prompt: str | None) -> str:
-    model = _host().stt_model
+@contextmanager
+def _leased_model(current: PluginHost, kind: str) -> Any:
+    pools = getattr(current, "model_pools", {})
+    pool = pools.get(kind) if isinstance(pools, dict) else None
+    if pool is None:
+        yield getattr(current, f"{kind}_model", None)
+        return
+
+    with pool.lease() as model:
+        yield model
+
+
+def _transcribe(
+    audio: Any,
+    language: str | None,
+    prompt: str | None,
+    model: Any | None = None,
+) -> str:
+    model = model or _host().stt_model
     if model is None:
         raise HTTPException(status_code=503, detail="STT model is not available")
 
@@ -190,6 +207,13 @@ def _transcribe(audio: Any, language: str | None, prompt: str | None) -> str:
             detail=f"STT model does not support: {', '.join(unsupported)}",
         )
     return model.transcribe(audio, **options)
+
+
+def _speech_chunks(current: PluginHost, text: str, voice: str, speed: float) -> Iterable[bytes]:
+    with _leased_model(current, "tts") as model:
+        if model is None:
+            raise HTTPException(status_code=503, detail="TTS model is not available")
+        yield from adjust_pcm_speed(model.synthesize(text, voice), speed)
 
 
 async def _stream_audio(request: Request, chunks: Iterable[bytes], include_wav_header: bool) -> Any:
@@ -243,6 +267,10 @@ def health() -> dict[str, Any]:
         "stt_ready": current.stt_model is not None,
         "tts_ready": current.tts_model is not None,
         "embedding_ready": current.embedding_model is not None,
+        "model_concurrency": {
+            kind: pool.size if pool is not None else 0
+            for kind, pool in getattr(current, "model_pools", {}).items()
+        },
     }
 
 
@@ -271,7 +299,18 @@ async def create_transcription(
     data = await file.read()
     try:
         audio = decode_upload_to_audio_data(data, file.filename)
-        text = _transcribe(audio, language, prompt)
+        model_pool = getattr(current, "model_pools", {}).get("stt")
+        if model_pool is None:
+            model = current.stt_model
+            if model is None:
+                raise HTTPException(status_code=503, detail="STT model is not available")
+            text = await anyio.to_thread.run_sync(_transcribe, audio, language, prompt, model)
+        else:
+            model = await anyio.to_thread.run_sync(model_pool.acquire)
+            try:
+                text = await anyio.to_thread.run_sync(_transcribe, audio, language, prompt, model)
+            finally:
+                model_pool.release(model)
     except HTTPException:
         raise
     except Exception as exc:
@@ -303,7 +342,7 @@ def create_speech(
     response_format = speech_request.response_format or configured_tts.get("response_format", "wav")
 
     try:
-        pcm = adjust_pcm_speed(current.tts_model.synthesize(speech_request.input, voice), speech_request.speed or 1.0)
+        pcm = _speech_chunks(current, speech_request.input, voice, speech_request.speed or 1.0)
         if response_format == "pcm":
             return StreamingResponse(_stream_audio(request, pcm, include_wav_header=False), media_type="audio/pcm")
         return StreamingResponse(_stream_audio(request, pcm, include_wav_header=True), media_type="audio/wav")
@@ -328,15 +367,18 @@ def create_embeddings(
     inputs = request.input if isinstance(request.input, list) else [request.input]
     data = []
     model_name = requested_model
-    for index, input_text in enumerate(inputs):
-        model_name, embedding = current.embedding_model.create_embedding(input_text)
-        data.append(
-            {
-                "object": "embedding",
-                "embedding": _finite_embedding(embedding),
-                "index": index,
-            }
-        )
+    with _leased_model(current, "embedding") as embedding_model:
+        if embedding_model is None:
+            raise HTTPException(status_code=503, detail="Embedding model is not available")
+        for index, input_text in enumerate(inputs):
+            model_name, embedding = embedding_model.create_embedding(input_text)
+            data.append(
+                {
+                    "object": "embedding",
+                    "embedding": _finite_embedding(embedding),
+                    "index": index,
+                }
+            )
 
     return {
         "object": "list",

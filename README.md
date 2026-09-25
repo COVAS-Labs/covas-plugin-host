@@ -88,13 +88,14 @@ The host selects no providers by default. Configure the plugin provider IDs and 
 
 ```json
 {
-  "stt": { "provider": "your-stt-provider" },
+  "stt": { "provider": "your-stt-provider", "concurrency": 2 },
   "tts": {
     "provider": "your-tts-provider",
+    "concurrency": 3,
     "voice": "your-voice",
     "response_format": "wav"
   },
-  "embedding": { "provider": "your-embedding-provider" },
+  "embedding": { "provider": "your-embedding-provider", "concurrency": 1 },
   "plugin_settings": {
     "your-plugin-guid": {
       "your-plugin-setting": "value"
@@ -102,6 +103,16 @@ The host selects no providers by default. Configure the plugin provider IDs and 
   }
 }
 ```
+
+`stt.concurrency`, `tts.concurrency`, and `embedding.concurrency` set how many
+independent instances of each configured provider the host creates. Requests
+lease an instance for the duration of inference; excess requests wait for one
+to become available. A TTS instance remains leased until its audio stream
+finishes or is interrupted. The default is `1` for each model, and values from
+`1` through `64` are accepted. This is separate from plugin-specific settings
+such as `onnx_threads`; a higher concurrency multiplies the configured plugin
+model's resource use. `/health` reports the loaded pool sizes in
+`model_concurrency`.
 
 Environment overrides:
 
