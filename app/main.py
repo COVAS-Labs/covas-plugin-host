@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager, contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
 import contextlib
@@ -219,25 +221,29 @@ def _speech_chunks(current: PluginHost, text: str, voice: str, speed: float) -> 
 async def _stream_audio(request: Request, chunks: Iterable[bytes], include_wav_header: bool) -> Any:
     iterator = iter(chunks)
     close = getattr(iterator, "close", None)
-    try:
-        if include_wav_header:
-            from .audio import wav_stream_header
+    loop = asyncio.get_running_loop()
+    # Generators may hold thread-owned locks across yields. Keep every next()
+    # and close() for this response on the same worker thread.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts-stream") as executor:
+        try:
+            if include_wav_header:
+                from .audio import wav_stream_header
 
-            yield wav_stream_header()
+                yield wav_stream_header()
 
-        while True:
-            if await request.is_disconnected():
-                break
+            while True:
+                if await request.is_disconnected():
+                    break
 
-            has_chunk, chunk = await anyio.to_thread.run_sync(_next_chunk, iterator)
-            if not has_chunk:
-                break
-            if chunk:
-                yield chunk
-    finally:
-        if close is not None:
-            with contextlib.suppress(Exception):
-                close()
+                has_chunk, chunk = await loop.run_in_executor(executor, _next_chunk, iterator)
+                if not has_chunk:
+                    break
+                if chunk:
+                    yield chunk
+        finally:
+            if close is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(loop.run_in_executor(executor, close))
 
 
 def _host() -> PluginHost:

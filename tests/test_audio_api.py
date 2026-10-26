@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import threading
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -36,6 +37,17 @@ class FakeTTSModel(TTSModel):
         yield b"\x00\x00" * 4800
 
 
+class ThreadBoundTTSModel(TTSModel):
+    def __init__(self):
+        super().__init__("thread-bound-tts")
+        self.lock = threading.RLock()
+
+    def synthesize(self, text, voice):
+        with self.lock:
+            for _ in range(3):
+                yield b"\x00\x00" * 1200
+
+
 class FakeHost:
     def __init__(self, stt_model: STTModel, tts_model: TTSModel):
         self.stt_model = stt_model
@@ -49,6 +61,20 @@ class FakeHost:
 
 
 class AudioEndpointTests(unittest.TestCase):
+    def test_speech_keeps_stream_on_same_worker_thread(self) -> None:
+        model = ThreadBoundTTSModel()
+        current = FakeHost(FakeSTTModel(), model)
+        with patch("app.main.host", current), patch("app.main.settings", {"tts": {"provider": "thread-bound-tts"}}):
+            app.state.settings = {}
+            client = TestClient(app)
+            for _ in range(2):
+                response = client.post(
+                    "/v1/audio/speech",
+                    json={"model": "thread-bound-tts", "voice": "test", "input": "Hello", "response_format": "pcm"},
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(len(response.content), 7200)
+
     def test_transcription_forwards_supported_hints_and_returns_text(self) -> None:
         stt_model = FakeSTTModel()
         host = FakeHost(stt_model, FakeTTSModel())
